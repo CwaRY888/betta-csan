@@ -1,0 +1,1412 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>出貨掃碼核對</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+<style>
+:root{
+  --bg:#FAF8F3;          /* 生成り */
+  --panel:#FFFFFF;
+  --ink:#3B3A36;         /* 墨 */
+  --ink-soft:#8A867C;    /* 利休鼠 */
+  --line:#E6E1D6;
+  --accent:#5E7B8C;      /* 藍鼠 */
+  --ok:#6F8B6A;          /* 松葉 */
+  --ok-bg:#EEF3EC;
+  --warn:#C29A45;        /* 山吹 */
+  --warn-bg:#F8F1E2;
+  --bad:#BF5B52;         /* 紅緋 */
+  --bad-bg:#F9ECEA;
+  --muted-bg:#F3F0E9;
+  --loss:#7D6B99;        /* 藤鼠（損耗） */
+  --loss-bg:#F1EEF6;
+  --radius:10px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  background:var(--bg);color:var(--ink);
+  font-family:"Noto Sans TC","Hiragino Sans","PingFang TC","Microsoft JhengHei",sans-serif;
+  font-size:15px;line-height:1.6;
+  padding:24px 16px 80px;
+}
+.wrap{max-width:960px;margin:0 auto}
+header{margin-bottom:28px}
+header h1{font-size:22px;font-weight:600;letter-spacing:.12em}
+header p{color:var(--ink-soft);font-size:13px;letter-spacing:.05em;margin-top:2px}
+.step{
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+  padding:20px 22px;margin-bottom:18px;
+}
+.step-head{display:flex;align-items:baseline;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+.step-no{
+  font-size:12px;color:var(--accent);border:1px solid var(--accent);
+  border-radius:999px;padding:1px 10px;letter-spacing:.15em;white-space:nowrap;
+}
+.step-title{font-size:16px;font-weight:600;letter-spacing:.08em}
+.step-sub{font-size:12.5px;color:var(--ink-soft);margin-left:auto}
+
+button{
+  font-family:inherit;font-size:14px;letter-spacing:.05em;cursor:pointer;
+  border:1px solid var(--line);background:var(--panel);color:var(--ink);
+  border-radius:8px;padding:8px 16px;transition:background .15s,border-color .15s;
+}
+button:hover{border-color:var(--accent);color:var(--accent)}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.primary:hover{background:#4F6B7B;color:#fff}
+button.ghost{background:transparent}
+button:disabled{opacity:.4;cursor:not-allowed}
+select,input[type=text]{
+  font-family:inherit;font-size:14px;border:1px solid var(--line);border-radius:8px;
+  padding:7px 10px;background:#fff;color:var(--ink);outline:none;max-width:100%;
+}
+select:focus,input:focus{border-color:var(--accent)}
+
+.qr-format{
+  font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;
+  background:var(--muted-bg);border-radius:8px;padding:10px 14px;margin-bottom:14px;
+  color:var(--ink-soft);letter-spacing:.03em;
+}
+.qr-format b{color:var(--accent);font-weight:600}
+
+/* ---------- 匯入 ---------- */
+#dropZone{
+  border:1.5px dashed var(--line);border-radius:var(--radius);
+  padding:26px;text-align:center;color:var(--ink-soft);cursor:pointer;
+  transition:border-color .15s,background .15s;font-size:14px;
+}
+#dropZone:hover,#dropZone.drag{border-color:var(--accent);background:#F6F8FA;color:var(--accent)}
+.map-row{display:flex;flex-wrap:wrap;gap:14px;margin-top:14px;align-items:flex-end}
+.map-item label{display:block;font-size:12px;color:var(--ink-soft);margin-bottom:4px;letter-spacing:.08em}
+.map-item.key label::after{content:" ●";color:var(--accent);font-size:10px}
+.order-meta{font-size:13px;color:var(--ink-soft);margin-top:12px}
+.order-meta b{color:var(--ink);font-weight:600}
+.map-note{font-size:12px;color:var(--ink-soft);margin-top:10px}
+.map-note i{color:var(--accent);font-style:normal}
+
+/* ---------- 掃碼 ---------- */
+#scanInput{
+  width:100%;font-size:17px;padding:13px 16px;letter-spacing:.05em;
+  border:1.5px solid var(--line);border-radius:var(--radius);
+  font-family:ui-monospace,Menlo,Consolas,monospace;
+}
+#scanInput:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(94,123,140,.12)}
+.scan-mode{display:flex;gap:8px;margin-bottom:12px}
+.scan-mode button.active{background:var(--muted-bg);border-color:var(--ink-soft)}
+#reader{margin-top:12px;border-radius:var(--radius);overflow:hidden;border:1px solid var(--line)}
+#reader:empty{display:none}
+#lastScan{
+  margin-top:12px;padding:12px 16px;border-radius:8px;font-size:14px;
+  background:var(--muted-bg);color:var(--ink-soft);display:flex;gap:10px;align-items:center;
+  min-height:48px;flex-wrap:wrap;
+}
+#lastScan.ok{background:var(--ok-bg);color:var(--ok)}
+#lastScan.warn{background:var(--warn-bg);color:var(--warn)}
+#lastScan.bad{background:var(--bad-bg);color:var(--bad)}
+.scan-detail{font-size:12.5px;opacity:.85;width:100%;padding-left:36px}
+
+/* 判子 stamp */
+.stamp{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:26px;height:26px;border-radius:50%;font-size:13px;font-weight:600;
+  border:1.5px solid currentColor;flex:none;
+}
+.s-ok{color:var(--ok)} .s-short{color:var(--warn)} .s-over{color:var(--bad)}
+.s-out{color:var(--bad)} .s-zero{color:var(--ink-soft)} .s-err{color:var(--bad)} .s-dup{color:var(--warn)}
+.s-loss{color:var(--loss)}
+
+/* ---------- 進度列 ---------- */
+#statusBar{position:sticky;top:0;z-index:10;background:var(--bg);padding:10px 0 14px;margin-bottom:4px}
+.status-card{
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+  padding:12px 18px;display:flex;gap:18px;align-items:center;flex-wrap:wrap;
+}
+.stat{font-size:13px;color:var(--ink-soft);display:flex;gap:6px;align-items:center}
+.stat b{font-size:17px;font-weight:600;color:var(--ink)}
+.stat.c-ok b{color:var(--ok)} .stat.c-warn b{color:var(--warn)} .stat.c-bad b{color:var(--bad)}
+.progress{flex:1;min-width:140px;height:6px;background:var(--muted-bg);border-radius:3px;overflow:hidden}
+.progress i{display:block;height:100%;width:0;background:var(--ok);transition:width .25s;border-radius:3px}
+
+/* ---------- 明細表 ---------- */
+.filter-row{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center}
+.filter-row input{flex:1;min-width:160px}
+.chip{
+  font-size:12.5px;padding:4px 12px;border-radius:999px;border:1px solid var(--line);
+  background:#fff;cursor:pointer;color:var(--ink-soft);letter-spacing:.05em;
+}
+.chip.active{border-color:var(--ink-soft);background:var(--muted-bg);color:var(--ink)}
+.table-scroll{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13.5px;min-width:640px}
+th{
+  text-align:left;font-weight:500;color:var(--ink-soft);font-size:12px;letter-spacing:.1em;
+  padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap;
+}
+td{padding:9px 10px;border-bottom:1px solid #F0EDE5;vertical-align:middle}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+tr.r-over td,tr.r-out td{background:var(--bad-bg)}
+tr.r-short td{background:var(--warn-bg)}
+.qty-btn{padding:2px 9px;font-size:13px;border-radius:6px;margin-left:6px}
+.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;color:var(--ink-soft)}
+.vloc{font-size:11.5px;color:var(--accent)}
+.empty-note{color:var(--ink-soft);font-size:13.5px;text-align:center;padding:24px 0}
+
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+
+/* ---------- 核對結果總覽 ---------- */
+#summaryArea{margin-bottom:16px}
+.sum-bar{
+  display:flex;height:14px;border-radius:7px;overflow:hidden;
+  background:var(--muted-bg);margin-bottom:12px;
+}
+.sum-bar span{display:block;height:100%;transition:width .3s;cursor:pointer}
+.sum-bar span:hover{opacity:.8}
+.sum-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px}
+.sum-card{
+  display:flex;align-items:center;gap:10px;cursor:pointer;
+  border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:#fff;
+  transition:border-color .15s,box-shadow .15s;
+}
+.sum-card:hover{border-color:var(--c)}
+.sum-card.active{border-color:var(--c);box-shadow:0 0 0 2px color-mix(in srgb,var(--c) 25%,transparent)}
+.sum-card b{font-size:20px;font-weight:600;color:var(--c);line-height:1.1;display:block;font-variant-numeric:tabular-nums}
+.sum-card small{font-size:11.5px;color:var(--ink-soft);letter-spacing:.08em}
+.cust-name{font-size:11.5px;color:var(--ink-soft)}
+
+/* ---------- 模式選擇 ---------- */
+#modePicker{
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+  padding:22px;margin-bottom:18px;
+}
+.mode-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-top:14px}
+.mode-card{
+  border:1px solid var(--line);border-radius:10px;padding:16px;cursor:pointer;
+  transition:border-color .15s,box-shadow .15s;background:#fff;
+}
+.mode-card:hover{border-color:var(--accent);box-shadow:0 2px 10px rgba(94,123,140,.08)}
+.mode-card h3{font-size:15px;font-weight:600;margin-bottom:6px;letter-spacing:.05em}
+.mode-card p{font-size:12.5px;color:var(--ink-soft);line-height:1.5}
+.mode-card .tag{display:inline-block;font-size:11px;padding:1px 8px;border-radius:999px;margin-bottom:8px}
+.tag-solo{background:var(--muted-bg);color:var(--ink-soft)}
+.tag-share{background:var(--ok-bg);color:var(--ok)}
+#shareSetup{margin-top:16px;padding-top:16px;border-top:1px solid var(--line);display:none}
+#shareSetup .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px}
+#shareSetup label{display:block;font-size:12px;color:var(--ink-soft);margin-bottom:4px}
+.sync-badge{
+  display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:4px 12px;
+  border-radius:999px;background:var(--ok-bg);color:var(--ok);
+}
+.sync-badge .dot{width:7px;height:7px;border-radius:50%;background:var(--ok);animation:pulse 1.6s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.sync-off{background:var(--muted-bg);color:var(--ink-soft)}
+.sync-off .dot{background:var(--ink-soft);animation:none}
+.device-tag{font-size:10.5px;color:var(--accent);background:var(--muted-bg);padding:0 6px;border-radius:4px;margin-left:6px}
+
+
+/* ---------- 表頭點選篩選 ---------- */
+th.filterable{cursor:pointer;user-select:none}
+th.filterable:hover{color:var(--accent)}
+th.filterable .th-arrow{font-size:9px;margin-left:3px;opacity:.55}
+th.filterable.th-active{color:var(--accent);font-weight:600}
+th.filterable.th-active .th-arrow{opacity:1}
+th.sortable{cursor:pointer;user-select:none}
+th.sortable:hover{color:var(--accent)}
+.th-sort{font-size:10px;margin-left:2px;color:var(--accent)}
+#filterPop .fp-sort{display:flex;gap:6px;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+#filterPop .fp-sort button{padding:3px 10px;font-size:12.5px;border-radius:6px}
+#filterPop .fp-sort button.on{background:var(--muted-bg);border-color:var(--accent);color:var(--accent)}
+#filterPop{
+  position:absolute;z-index:50;background:#fff;border:1px solid var(--line);
+  border-radius:10px;box-shadow:0 6px 24px rgba(59,58,54,.12);
+  min-width:200px;max-width:280px;padding:10px;
+}
+#filterPop .fp-head{display:flex;gap:8px;margin-bottom:8px}
+#filterPop .fp-head button{padding:3px 10px;font-size:12.5px;border-radius:6px}
+#filterPop .fp-search{width:100%;font-size:13px;padding:5px 8px;margin-bottom:8px}
+#filterPop .fp-list{max-height:240px;overflow-y:auto}
+#filterPop label{
+  display:flex;align-items:center;gap:8px;font-size:13.5px;padding:5px 6px;
+  border-radius:6px;cursor:pointer;
+}
+#filterPop label:hover{background:var(--muted-bg)}
+#filterPop label small{color:var(--ink-soft);margin-left:auto;font-variant-numeric:tabular-nums}
+
+
+footer{margin-top:26px;font-size:12px;color:var(--ink-soft);text-align:center;letter-spacing:.05em}
+@media (max-width:560px){
+  body{padding:16px 10px 60px}
+  .step{padding:16px 14px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>出 貨 掃 碼 核 對</h1>
+  <p>匯入預計訂單 → 掃碼 → 即時媒合差異</p>
+</header>
+
+<!-- 進度列 -->
+<div id="statusBar" style="display:none">
+  <div class="status-card">
+    <div class="stat c-ok"><span class="stamp s-ok">合</span><b id="stOk">0</b></div>
+    <div class="stat c-warn"><span class="stamp s-short">欠</span><b id="stShort">0</b></div>
+    <div class="stat c-bad"><span class="stamp s-over">超</span><b id="stOver">0</b></div>
+    <div class="stat c-bad"><span class="stamp s-out">外</span><b id="stOut">0</b></div>
+    <div class="progress"><i id="progFill"></i></div>
+    <div class="stat"><b id="stPct">0%</b></div>
+  </div>
+</div>
+
+<!-- 模式選擇 -->
+<div id="modePicker">
+  <div class="step-head">
+    <span class="step-no">選</span>
+    <span class="step-title">選擇作業模式</span>
+  </div>
+  <div class="mode-cards">
+    <div class="mode-card" data-mode="cloud">
+      <span class="tag tag-solo">單機</span>
+      <h3>雲端最新訂單</h3>
+      <p>自動抓雲端資料夾最新訂單檔，本機作業、資料存本機。適合一人核對。</p>
+    </div>
+    <div class="mode-card" data-mode="manual">
+      <span class="tag tag-solo">單機</span>
+      <h3>手動匯入</h3>
+      <p>自己選 Excel 檔匯入，離線也能用。適合臨時或備用。</p>
+    </div>
+    <div class="mode-card" data-mode="share">
+      <span class="tag tag-share">共用</span>
+      <h3>多人共用同一批</h3>
+      <p>建立或加入批次，多台裝置即時同步同一批掃碼。適合 2–3 人一起出貨。</p>
+    </div>
+  </div>
+  <div id="shareSetup">
+    <div class="row">
+      <div><label>你的裝置名稱（辨識誰掃的）</label><input type="text" id="deviceName" placeholder="例如：小明、A區、平板1"></div>
+    </div>
+    <div class="row">
+      <button class="primary" id="btnCreateSession">建立新批次（讀雲端最新訂單）</button>
+      <span style="color:var(--ink-soft);font-size:13px">或</span>
+      <div><label>加入現有批次</label><input type="text" id="joinCode" placeholder="6 位數批次碼" maxlength="6" style="width:130px"></div>
+      <button id="btnJoinSession">加入</button>
+    </div>
+    <div id="sessionInfo" style="font-size:13px;color:var(--ink-soft);margin-top:8px"></div>
+  </div>
+</div>
+
+<!-- 步驟一：匯入訂單 -->
+<section class="step" id="stepImport" style="display:none">
+  <div class="step-head">
+    <span class="step-no">壹</span>
+    <span class="step-title">匯入預計訂單</span>
+    <span class="step-sub">Excel（.xlsx / .xls / .csv）</span>
+  </div>
+  <div class="qr-format">
+    QR 格式：<b>客戶代碼</b>@<b>品號</b>*批號-<b>實際櫃位</b>-虛擬櫃位　｜　媒合 key＝客戶＋品號＋實際櫃位，品名由品號對應
+  </div>
+  <div id="dropZone">點選或拖曳訂單檔案到這裡</div>
+  <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" style="display:none">
+  <div class="map-row" id="sheetArea" style="display:none">
+    <div class="map-item"><label>工作表（分頁）</label><select id="sheetSelect"></select></div>
+    <span class="map-note" id="sheetInfo" style="margin-bottom:8px"></span>
+  </div>
+  <div id="mapArea" style="display:none">
+    <div class="map-row">
+      <div class="map-item key"><label>客戶代碼</label><select id="colCust"></select></div>
+      <div class="map-item"><label>客戶名稱（可選）</label><select id="colCustName"></select></div>
+      <div class="map-item key"><label>品號（fishtype）</label><select id="colFish"></select></div>
+      <div class="map-item key"><label>實際櫃位</label><select id="colLoc"></select></div>
+      <div class="map-item"><label>品名（可選）</label><select id="colName"></select></div>
+      <div class="map-item"><label>預計數量</label><select id="colQty"></select></div>
+      <button class="primary" id="btnLoadOrder">載入訂單</button>
+    </div>
+    <div class="map-note"><i>●</i> 為媒合 key 欄位；數量欄若選「固定為 1」則每列視為 1 件</div>
+    <div class="map-note" id="mapPreview" style="margin-top:6px"></div>
+  </div>
+  <div class="order-meta" id="orderMeta"></div>
+</section>
+
+<!-- 步驟二：掃碼 -->
+<section class="step" id="stepScan" style="display:none">
+  <div class="step-head">
+    <span class="step-no">貳</span>
+    <span class="step-title">掃碼</span>
+    <span class="step-sub" id="scanSub">掃描槍直接掃即可，或開啟相機</span>
+    <span class="sync-badge sync-off" id="syncBadge" style="display:none"><span class="dot"></span><span id="syncText">未連線</span></span>
+  </div>
+  <div class="scan-mode">
+    <button id="modeGun" class="active">掃描槍 / 手動輸入</button>
+    <button id="modeCam">相機掃描</button>
+  </div>
+  <input type="text" id="scanInput" placeholder="客戶代碼+批號+實際櫃位+虛擬櫃位" autocomplete="off">
+  <div id="reader"></div>
+  <div id="lastScan"><span>尚未掃描</span></div>
+</section>
+
+<!-- 步驟三：明細與差異 -->
+<section class="step" id="stepList" style="display:none">
+  <div class="step-head">
+    <span class="step-no">參</span>
+    <span class="step-title">核對明細</span>
+    <span class="step-sub" id="listSub"></span>
+  </div>
+
+  <!-- 核對結果總覽 -->
+  <div id="summaryArea">
+    <div class="sum-bar" id="sumBar"></div>
+    <div class="sum-cards">
+      <div class="sum-card" data-f="done"  style="--c:var(--ok)"><span class="stamp s-ok">合</span><div><b id="cOk">0</b><small>吻合</small></div></div>
+      <div class="sum-card" data-f="short" style="--c:var(--warn)"><span class="stamp s-short">欠</span><div><b id="cShort">0</b><small>不足</small></div></div>
+      <div class="sum-card" data-f="over"  style="--c:var(--bad)"><span class="stamp s-over">超</span><div><b id="cOver">0</b><small>超出</small></div></div>
+      <div class="sum-card" data-f="zero"  style="--c:var(--ink-soft)"><span class="stamp s-zero">未</span><div><b id="cZero">0</b><small>未掃</small></div></div>
+      <div class="sum-card" data-f="out"   style="--c:var(--bad)"><span class="stamp s-out">外</span><div><b id="cOut">0</b><small>訂單外</small></div></div>
+      <div class="sum-card" data-f="loss"  style="--c:var(--loss)"><span class="stamp s-loss">損</span><div><b id="cLoss">0</b><small>損耗</small></div></div>
+    </div>
+  </div>
+
+  <div class="filter-row">
+    <input type="text" id="searchBox" placeholder="搜尋客戶、品號、品名、批號或櫃位…">
+    <span class="chip active" data-f="all">全部</span>
+    <span class="chip" data-f="pending">未完成</span>
+    <span class="chip" data-f="diff">有差異</span>
+    <span class="chip" data-f="done">已吻合</span>
+  </div>
+  <div class="table-scroll">
+  <table>
+    <thead><tr>
+      <th style="width:34px"></th>
+      <th class="filterable" data-col="cust">客戶<span class="th-arrow">▾</span><span class="th-sort" data-s="cust"></span></th>
+      <th class="filterable" data-col="fish">品號<span class="th-arrow">▾</span><span class="th-sort" data-s="fish"></span></th>
+      <th class="filterable" data-col="name">品名<span class="th-arrow">▾</span><span class="th-sort" data-s="name"></span></th>
+      <th class="filterable" data-col="loc">實際櫃位<span class="th-arrow">▾</span><span class="th-sort" data-s="loc"></span></th>
+      <th class="num sortable" data-sort="qty">預計<span class="th-sort" data-s="qty"></span></th>
+      <th class="num sortable" data-sort="got">實掃<span class="th-sort" data-s="got"></span></th>
+      <th class="num sortable" data-sort="diff">差異<span class="th-sort" data-s="diff"></span></th>
+      <th style="width:96px"></th>
+    </tr></thead>
+    <tbody id="tbody"></tbody>
+  </table>
+  </div>
+  <div id="filterPop" style="display:none"></div>
+  <div class="empty-note" id="emptyNote" style="display:none">沒有符合的項目</div>
+  <div class="actions">
+    <button class="primary" id="btnExport">匯出核對報告（Excel・六分頁）</button>
+    <button id="btnResetScan">清除掃描紀錄</button>
+    <button class="ghost" id="btnResetAll">重設全部</button>
+  </div>
+</section>
+
+<!-- 步驟四：損耗（cwa.doa） -->
+<section class="step" id="stepLoss" style="display:none;border-color:var(--loss)">
+  <div class="step-head">
+    <span class="step-no" style="color:var(--loss);border-color:var(--loss)">肆</span>
+    <span class="step-title">損耗（cwa.doa）</span>
+    <span class="step-sub" id="lossSub"></span>
+  </div>
+  <div class="table-scroll">
+  <table>
+    <thead><tr>
+      <th style="width:34px"></th><th>品號</th><th>品名</th><th>批號</th><th>實際櫃位</th>
+      <th class="num">預計</th><th class="num">實掃</th><th class="num">差異</th><th style="width:56px"></th>
+    </tr></thead>
+    <tbody id="lossBody"></tbody>
+  </table>
+  </div>
+</section>
+
+<footer>掃碼核對 v4.0（單機＋共用） ｜ QR：客戶代碼@品號*批號-實際櫃位-虛擬櫃位 ｜ cwa.doa 自動歸入損耗 ｜ 資料僅存於本機瀏覽器</footer>
+</div>
+
+<script>
+/* ================= 狀態 ================= */
+const LS_KEY='shipScanCheck_v3';
+const SEP='␟';
+
+/* ===== 共用模式設定 ===== */
+// 本工具放在 GitHub Pages，透過 fetch 呼叫 Apps Script 後端（/exec 網址）
+// ★ 部署 Apps Script 後，把最新的 /exec 網址填在這裡 ★
+const GAS_URL='https://script.google.com/macros/s/AKfycbzW-O2d-WbFwvpe5_TGy9QuF-8Nh9_Cu-3dwBNEAx0OFxqFSUbnMgKeF-YNCskEfUeu/exec';
+let appMode='';            // cloud / manual / share
+let sessionCode='';        // 共用批次碼
+let deviceName='';         // 本機裝置名
+let syncTimer=null;        // 輪詢計時器
+let lastEventTs=0;         // 已同步到的最新事件時間戳
+let seenEventTs={};        // 已處理過的事件 ts，避免重複
+let pendingQueue=[];       // 離線時暫存待上傳的掃碼
+
+/* GET 呼叫（帶 action 參數） */
+async function gasGet(params){
+  const qs=Object.keys(params).map(k=>k+'='+encodeURIComponent(params[k])).join('&');
+  const res=await fetch(GAS_URL+'?'+qs);
+  return res.json();
+}
+/* POST 呼叫（用 text/plain 避免 CORS preflight） */
+async function gasPost(body){
+  const res=await fetch(GAS_URL,{method:'post',
+    headers:{'Content-Type':'text/plain;charset=utf-8'},
+    body:JSON.stringify(body)});
+  return res.json();
+}
+let rawRows=[], headers=[];
+let workbook=null, currentFileName='';
+let order=[];               // [{key,cust,fish,loc,name,qty}]
+let scans={};               // {key:count}
+let serials={};             // {key:{批號:次數}} 掃到的批號紀錄
+let vlocs={};               // {key:{虛擬櫃位:count}}
+let unknown={};             // {key:{cust,fish,loc,count,vl:{}}}
+let losses={};              // {fishSEPloc:{fish,loc,count,vl:{},sn:{}}} 掃到的損耗（cwa.doa）
+let lossOrder={};           // {fishSEPloc:{fish,loc,name,qty}} 訂單檔中的預計損耗列（cwa.doa）
+const LOSS_CUSTS=['CWA.DOA'];  // 這些客戶代碼的掃碼自動歸入損耗區（比對前會正規化為大寫）
+let badScans=[];
+let camScanner=null, lastCamCode='', lastCamTime=0;
+let filterMode='all';
+
+/* ================= 正規化與 QR 解析 =================
+   QR：客戶代碼@品號*批號-實際櫃位-虛擬櫃位
+   例：CU7028@FG51003L*A10070260707-402-0075509      */
+function toHalfWidth(s){
+  return s.replace(/[\uFF01-\uFF5E]/g,c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0)).replace(/\u3000/g,' ');
+}
+function norm(s){return toHalfWidth(String(s??'')).trim().toUpperCase();}
+function normLoc(s){const n=norm(s);return /^\d+$/.test(n)?String(parseInt(n,10)):n;}
+function makeKey(cust,fish,loc){return norm(cust)+SEP+norm(fish)+SEP+normLoc(loc);}
+
+function parseQR(text){
+  const t=toHalfWidth(text).trim();
+  const at=t.indexOf('@');
+  if(at<=0) return null;
+  const cust=t.slice(0,at).trim();
+  const parts=t.slice(at+1).split('-');
+  if(parts.length<3) return null;
+  const vloc=parts.pop().trim();
+  const loc=parts.pop().trim();
+  const mid=parts.join('-').trim();      // 品號*批號（品號含 - 也不怕）
+  const star=mid.indexOf('*');
+  const fish=(star>=0?mid.slice(0,star):mid).trim();
+  const serial=(star>=0?mid.slice(star+1):'').trim();
+  if(!cust||!fish||!loc) return null;
+  return {cust,fish,serial,loc,vloc};
+}
+
+/* ================= 音效 ================= */
+const AC=window.AudioContext||window.webkitAudioContext;
+let audioCtx=null;
+function beep(type){
+  try{
+    if(!audioCtx)audioCtx=new AC();
+    const play=(f,s,d,vol,wave)=>{
+      const o=audioCtx.createOscillator(),g=audioCtx.createGain();
+      o.frequency.value=f;o.type=wave||'sine';
+      g.gain.setValueAtTime(vol||.25,audioCtx.currentTime+s);
+      g.gain.exponentialRampToValueAtTime(.001,audioCtx.currentTime+s+d);
+      o.connect(g);g.connect(audioCtx.destination);
+      o.start(audioCtx.currentTime+s);o.stop(audioCtx.currentTime+s+d);
+    };
+    if(type==='ok')play(1200,0,.12);
+    else if(type==='done'){play(1000,0,.1);play(1400,.12,.15);}
+    else if(type==='loss'){play(520,0,.14);play(390,.16,.22);}   // 損耗：柔和雙降音
+    else if(type==='alarm'){
+      // 差異警報：三聲高音量方波急促示警，讓現場能立刻停下處理
+      play(880,0,.22,.7,'square');
+      play(660,.26,.22,.7,'square');
+      play(880,.52,.35,.7,'square');
+      if(navigator.vibrate)navigator.vibrate([250,120,250,120,400]);
+    }
+    else{play(320,0,.15);play(320,.18,.2);}
+  }catch(e){}
+}
+
+/* ================= 匯入 ================= */
+const dropZone=document.getElementById('dropZone');
+const fileInput=document.getElementById('fileInput');
+dropZone.onclick=()=>fileInput.click();
+dropZone.ondragover=e=>{e.preventDefault();dropZone.classList.add('drag');};
+dropZone.ondragleave=()=>dropZone.classList.remove('drag');
+dropZone.ondrop=e=>{e.preventDefault();dropZone.classList.remove('drag');if(e.dataTransfer.files[0])readFile(e.dataTransfer.files[0]);};
+fileInput.onchange=e=>{if(e.target.files[0])readFile(e.target.files[0]);};
+
+const DEFAULT_SHEET='鬥魚下架用';
+function readFile(file){
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      workbook=XLSX.read(e.target.result,{type:'array'});
+      currentFileName=file.name;
+      const names=workbook.SheetNames;
+      const sel=document.getElementById('sheetSelect');
+      sel.innerHTML=names.map((n,i)=>`<option value="${i}">${esc(n)}</option>`).join('');
+      document.getElementById('sheetArea').style.display='flex';
+      dropZone.textContent='已讀取：'+file.name+'（'+names.length+' 個分頁）— 請選擇工作表';
+      // 預設分頁：完全相同 > 包含關鍵字 > 第一個分頁
+      let idx=names.findIndex(n=>n.trim()===DEFAULT_SHEET);
+      if(idx<0)idx=names.findIndex(n=>n.includes(DEFAULT_SHEET));
+      if(idx<0)idx=0;
+      sel.value=idx;
+      parseSheet(idx);
+    }catch(err){alert('讀取失敗：'+err.message);}
+  };
+  reader.readAsArrayBuffer(file);
+}
+document.getElementById('sheetSelect').onchange=e=>parseSheet(+e.target.value);
+
+function parseSheet(idx){
+  const name=workbook.SheetNames[idx];
+  const ws=workbook.Sheets[name];
+  const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+  const info=document.getElementById('sheetInfo');
+  if(rows.length<2){
+    info.textContent='此分頁內容不足（需要標題列＋資料），請換一個分頁';
+    document.getElementById('mapArea').style.display='none';
+    headers=[];rawRows=[];
+    return;
+  }
+  headers=rows[0].map(h=>String(h).trim());
+  rawRows=rows.slice(1).filter(r=>r.some(c=>String(c).trim()!==''));
+  info.textContent='「'+name+'」共 '+rawRows.length+' 列資料';
+  buildColumnSelects();
+  document.getElementById('mapArea').style.display='block';
+}
+
+/* 計分制欄位判讀：完全相同 100 > 開頭符合 50 > 包含 10；排除詞直接跳過 */
+function guessCol(keys,excludes,used){
+  let best=-1,bestScore=0;
+  for(let i=0;i<headers.length;i++){
+    if(used&&used.has(i))continue;
+    const h=headers[i].toLowerCase().replace(/\s/g,'');
+    if(!h)continue;
+    if(excludes&&excludes.some(x=>h.includes(x)))continue;
+    let score=0;
+    for(const k of keys){
+      if(h===k){score=100;break;}
+      if(h.startsWith(k))score=Math.max(score,50);
+      else if(h.includes(k))score=Math.max(score,10);
+    }
+    if(score>bestScore){bestScore=score;best=i;}
+  }
+  return best;
+}
+function buildColumnSelects(){
+  const opts=headers.map((h,i)=>`<option value="${i}">${esc(h)||('欄 '+(i+1))}</option>`).join('');
+  const set=(id,extra)=>{document.getElementById(id).innerHTML=(extra||'')+opts;};
+  set('colCust');set('colFish');set('colLoc');
+  set('colCustName','<option value="-1">（不使用）</option>');
+  set('colName','<option value="-1">（不使用）</option>');
+  set('colQty','<option value="-1">（固定為 1）</option>');
+  const used=new Set();
+  const g=(id,keys,excludes,markUsed)=>{
+    const x=guessCol(keys,excludes,used);
+    if(x>=0){document.getElementById(id).value=x;if(markUsed)used.add(x);}
+    return x;
+  };
+  g('colCust',['客戶代碼','客戶','customer','cust','client'],['名稱','簡稱'],true);
+  g('colCustName',['客戶名稱','客戶簡稱','customername'],['代碼'],false);
+  g('colFish',['fishtype','fish','品號','貨號','sku','魚種代碼','代碼','type'],['客戶'],true);
+  g('colLoc',['實際櫃位','櫃位','儲位','location','loc','position'],['虛擬'],true);
+  g('colName',['品名','中文名','中文品名','名稱','商品名','name','description','魚種'],['英文','學名','客戶','檔名'],false);
+  g('colQty',['預計數量','數量','出貨數','qty','quantity','pcs','箱數'],['單價','金額','價'],false);
+  ['colCust','colCustName','colFish','colLoc','colName','colQty'].forEach(id=>{
+    document.getElementById(id).onchange=updateMapPreview;
+  });
+  updateMapPreview();
+}
+function updateMapPreview(){
+  const el=document.getElementById('mapPreview');
+  if(!rawRows.length){el.textContent='';return;}
+  const r=rawRows[0];
+  const val=id=>{
+    const i=+document.getElementById(id).value;
+    return i>=0?String(r[i]??'').trim():null;
+  };
+  const cust=val('colCust'),custName=val('colCustName'),fish=val('colFish'),loc=val('colLoc');
+  const name=val('colName'),qty=val('colQty');
+  el.innerHTML='預覽第 1 列 → 客戶「<i>'+esc(cust)+'</i>」'
+    +(custName!==null?'（<i>'+esc(custName)+'</i>）':'')
+    +'｜品號「<i>'+esc(fish)+'</i>」｜實際櫃位「<i>'+esc(loc)+'</i>」'
+    +(name!==null?'｜品名「<i>'+esc(name)+'</i>」':'')
+    +(qty!==null?'｜數量「<i>'+esc(qty)+'</i>」':'｜數量固定 1')
+    +'　→ 對應 QR：<i>'+esc(cust)+'@'+esc(fish)+'*批號-'+esc(loc)+'-虛擬櫃位</i>';
+}
+
+document.getElementById('btnLoadOrder').onclick=()=>{
+  const ci=+document.getElementById('colCust').value;
+  const cnIdx=+document.getElementById('colCustName').value;
+  const fi=+document.getElementById('colFish').value;
+  const li=+document.getElementById('colLoc').value;
+  const ni=+document.getElementById('colName').value;
+  const qi=+document.getElementById('colQty').value;
+  if(new Set([ci,fi,li]).size<3){alert('客戶代碼、品號、實際櫃位必須是三個不同欄位');return;}
+  const map={};
+  const lmap={};
+  rawRows.forEach(r=>{
+    const cust=String(r[ci]??'').trim();
+    const fish=String(r[fi]??'').trim();
+    const loc=String(r[li]??'').trim();
+    if(!cust&&!fish&&!loc)return;
+    const custName=cnIdx>=0?String(r[cnIdx]??'').trim():'';
+    const name=ni>=0?String(r[ni]??'').trim():'';
+    const qty=qi>=0?(parseFloat(r[qi])||0):1;
+    // cwa.doa 的列直接分流到損耗區（預計損耗），不進核對明細
+    if(LOSS_CUSTS.includes(norm(cust))){
+      const lk=norm(fish)+SEP+normLoc(loc);
+      if(lmap[lk]){lmap[lk].qty+=qty;if(!lmap[lk].name&&name)lmap[lk].name=name;}
+      else lmap[lk]={fish,loc,name,qty};
+      return;
+    }
+    const key=makeKey(cust,fish,loc);
+    if(map[key]){
+      map[key].qty+=qty;
+      if(!map[key].name&&name)map[key].name=name;
+      if(!map[key].custName&&custName)map[key].custName=custName;
+    }
+    else map[key]={key,cust,custName,fish,loc,name,qty};
+  });
+  order=Object.values(map).filter(o=>o.cust||o.fish||o.loc);
+  lossOrder=lmap;
+  if(!order.length&&!Object.keys(lossOrder).length){alert('沒有讀到有效資料，請確認欄位對應');return;}
+  scans={};serials={};vlocs={};unknown={};losses={};badScans=[];
+  save();startWork();
+};
+
+/* ================= 開始作業 ================= */
+function startWork(){
+  document.getElementById('stepScan').style.display='';
+  document.getElementById('stepList').style.display='';
+  document.getElementById('statusBar').style.display='';
+  document.getElementById('orderMeta').innerHTML=
+    '訂單已載入：<b>'+order.length+'</b> 個品項（客戶×品號×櫃位），共 <b>'+order.reduce((s,o)=>s+o.qty,0)+'</b> 件';
+  buildCustomFilters();
+  render();focusScan();
+}
+/* ---------- 表頭點選篩選 ---------- */
+let colFilters={cust:null,fish:null,name:null,loc:null}; // null=不篩選；Set=僅顯示選中的值
+function buildCustomFilters(){
+  colFilters={cust:null,fish:null,name:null,loc:null};
+  updateThState();
+}
+function colValueOf(row,col){
+  if(col==='name')return row.name||'—';
+  return String(row[col]??'');
+}
+function colValues(col){
+  const cnt={};
+  order.forEach(o=>{const v=colValueOf(o,col);cnt[v]=(cnt[v]||0)+1;});
+  if(col!=='name')Object.values(unknown).forEach(u=>{const v=String(u[col]??'');cnt[v]=(cnt[v]||0)+1;});
+  return Object.keys(cnt).sort((a,b)=>a.localeCompare(b,'zh-Hant',{numeric:true})).map(v=>({v,n:cnt[v]}));
+}
+function custLabel(code){
+  const o=order.find(x=>x.cust===code&&x.custName);
+  return o?code+'　'+o.custName:code;
+}
+/* ---------- 排序 ---------- */
+let sortState={col:null,dir:1};   // col: cust/fish/name/loc/qty/got/diff；dir: 1 昇冪 / -1 降冪
+function sortValOf(o,col){
+  const got=scans[o.key]||0;
+  switch(col){
+    case 'qty':return o.qty;
+    case 'got':return got;
+    case 'diff':return got-o.qty;
+    case 'name':return o.name||'';
+    default:return String(o[col]??'');
+  }
+}
+function setSort(col,dir){
+  if(sortState.col===col&&sortState.dir===dir){sortState={col:null,dir:1};}
+  else sortState={col,dir};
+  updateSortArrows();render();
+}
+function updateSortArrows(){
+  document.querySelectorAll('.th-sort').forEach(sp=>{
+    sp.textContent=(sortState.col===sp.dataset.s)?(sortState.dir===1?'▲':'▼'):'';
+  });
+}
+let popCol=null;
+function openFilterPop(th){
+  const col=th.dataset.col;
+  const pop=document.getElementById('filterPop');
+  if(popCol===col&&pop.style.display!=='none'){closeFilterPop();return;}
+  popCol=col;
+  const vals=colValues(col);
+  const sel=colFilters[col]; // null 或 Set
+  const sAsc=sortState.col===col&&sortState.dir===1?' class="on"':'';
+  const sDesc=sortState.col===col&&sortState.dir===-1?' class="on"':'';
+  pop.innerHTML=
+    '<div class="fp-sort"><button id="fpAsc"'+sAsc+'>排序 ▲</button><button id="fpDesc"'+sDesc+'>排序 ▼</button></div>'+
+    '<div class="fp-head"><button id="fpAll">全選</button><button id="fpNone">清除</button><button id="fpClose" style="margin-left:auto">關閉</button></div>'+
+    '<input type="text" class="fp-search" id="fpSearch" placeholder="搜尋選項…">'+
+    '<div class="fp-list" id="fpList">'+
+    vals.map(x=>{
+      const checked=(sel===null||sel.has(x.v))?' checked':'';
+      const label=col==='cust'?custLabel(x.v):x.v;
+      return '<label><input type="checkbox" value="'+esc(x.v)+'"'+checked+'>'+esc(label||'—')+'<small>'+x.n+'</small></label>';
+    }).join('')+'</div>';
+  // 定位在表頭下方
+  const rect=th.getBoundingClientRect();
+  pop.style.display='block';
+  pop.style.left=Math.min(rect.left+window.scrollX,window.scrollX+document.documentElement.clientWidth-300)+'px';
+  pop.style.top=(rect.bottom+window.scrollY+4)+'px';
+  const apply=()=>{
+    const boxes=[...pop.querySelectorAll('.fp-list input')];
+    const on=boxes.filter(b=>b.checked).map(b=>b.value);
+    colFilters[col]=(on.length===boxes.length)?null:new Set(on);
+    updateThState();render();
+  };
+  pop.querySelectorAll('.fp-list input').forEach(b=>b.onchange=apply);
+  pop.querySelector('#fpAsc').onclick=()=>{setSort(col,1);closeFilterPop();};
+  pop.querySelector('#fpDesc').onclick=()=>{setSort(col,-1);closeFilterPop();};
+  pop.querySelector('#fpAll').onclick=()=>{pop.querySelectorAll('.fp-list input').forEach(b=>b.checked=true);apply();};
+  pop.querySelector('#fpNone').onclick=()=>{pop.querySelectorAll('.fp-list input').forEach(b=>b.checked=false);apply();};
+  pop.querySelector('#fpClose').onclick=closeFilterPop;
+  pop.querySelector('#fpSearch').oninput=e=>{
+    const kw=e.target.value.trim().toLowerCase();
+    pop.querySelectorAll('.fp-list label').forEach(l=>{
+      l.style.display=l.textContent.toLowerCase().includes(kw)?'':'none';
+    });
+  };
+}
+function closeFilterPop(){document.getElementById('filterPop').style.display='none';popCol=null;}
+function updateThState(){
+  document.querySelectorAll('th.filterable').forEach(th=>{
+    th.classList.toggle('th-active',colFilters[th.dataset.col]!==null);
+  });
+}
+document.addEventListener('click',e=>{
+  const thf=e.target.closest('th.filterable');
+  if(thf){openFilterPop(thf);return;}
+  const ths=e.target.closest('th.sortable');
+  if(ths){
+    const col=ths.dataset.sort;
+    // 點擊循環：昇冪 → 降冪 → 取消
+    if(sortState.col!==col)setSort(col,1);
+    else if(sortState.dir===1)setSort(col,-1);
+    else setSort(col,-1); // setSort 內部同 col 同 dir 會取消
+    return;
+  }
+  if(!e.target.closest('#filterPop'))closeFilterPop();
+});
+function passColFilters(row,isUnknown){
+  for(const col of ['cust','fish','name','loc']){
+    const f=colFilters[col];
+    if(!f)continue;
+    if(col==='name'&&isUnknown)return false;   // 品名篩選時訂單外品項無品名，排除
+    const v=isUnknown?String(row[col]??''):colValueOf(row,col);
+    if(!f.has(v))return false;
+  }
+  return true;
+}
+
+/* ================= 掃碼處理 ================= */
+const scanInput=document.getElementById('scanInput');
+function focusScan(){if(document.getElementById('modeGun').classList.contains('active'))scanInput.focus();}
+scanInput.addEventListener('keydown',e=>{
+  if(e.key==='Enter'){
+    e.preventDefault();
+    const code=scanInput.value.trim();
+    scanInput.value='';
+    if(code)handleScan(code);
+  }
+});
+document.addEventListener('click',e=>{
+  if(e.target.closest('button,input,select,a,td,th,#filterPop'))return;
+  focusScan();
+});
+
+let lastRaw='',lastRawTime=0;
+function handleScan(raw){
+  const el=document.getElementById('lastScan');
+  el.style.background='';el.style.color='';
+  // 短時間內掃到完全相同的碼 → 視為誤觸重複，不計數
+  const nowT=Date.now();
+  if(raw===lastRaw&&nowT-lastRawTime<1800){
+    beep('bad');el.className='warn';
+    el.innerHTML='<span class="stamp s-dup">重</span><span>⚠ 與上一筆掃碼相同（間隔過短），未重複計數</span>';
+    return;
+  }
+  lastRaw=raw;lastRawTime=nowT;
+
+  const p=parseQR(raw);
+  if(!p){
+    badScans.push(raw);
+    beep('alarm');
+    el.className='bad';
+    el.innerHTML='<span class="stamp s-err">誤</span><span>QR 格式無法解析：<b class="mono">'+esc(raw)+'</b></span>'+
+      '<span class="scan-detail">預期格式：客戶代碼@品號*批號-實際櫃位-虛擬櫃位</span>';
+    save();return;
+  }
+
+  // 共用模式：解析成功即上傳（自己的掃碼也走後端，確保全場一致）
+  uploadScan(p,raw);
+
+  // ---- 損耗（cwa.doa）自動歸入獨立區 ----
+  if(LOSS_CUSTS.includes(norm(p.cust))){
+    const lk=norm(p.fish)+SEP+normLoc(p.loc);
+    if(!losses[lk])losses[lk]={fish:p.fish,loc:p.loc,count:0,vl:{},sn:{}};
+    const L=losses[lk];
+    L.count++;
+    if(p.vloc)L.vl[p.vloc]=(L.vl[p.vloc]||0)+1;
+    if(p.serial)L.sn[norm(p.serial)]=(L.sn[norm(p.serial)]||0)+1;
+    const lexp=lossOrder[lk]?lossOrder[lk].qty:0;
+    beep('loss');
+    el.className='';
+    el.style.background='var(--loss-bg)';el.style.color='var(--loss)';
+    el.innerHTML='<span class="stamp s-loss">損</span><span><b>'+esc(nameOfFish(p.fish)||p.fish)+'</b>　已記入損耗　'+L.count+(lexp?' / '+lexp:'')+'</span>'+
+      '<span class="scan-detail">品號 '+esc(p.fish)+'｜批號 '+esc(p.serial||'—')+'｜實際櫃位 '+esc(p.loc)+'｜虛擬櫃位 '+esc(p.vloc||'—')+'</span>';
+    save();render();return;
+  }
+
+  const key=makeKey(p.cust,p.fish,p.loc);
+  const item=order.find(o=>o.key===key);
+  const dispName=item&&item.name?item.name:p.fish;
+  const detail='客戶 '+esc(p.cust)+'｜品號 '+esc(p.fish)+'｜批號 '+esc(p.serial||'—')+'｜實際櫃位 '+esc(p.loc)+'｜虛擬櫃位 '+esc(p.vloc||'—');
+  if(item){
+    // 記錄批號（供匯出與查核）
+    if(p.serial){
+      if(!serials[key])serials[key]={};
+      const sn=norm(p.serial);
+      serials[key][sn]=(serials[key][sn]||0)+1;
+    }
+    scans[key]=(scans[key]||0)+1;
+    if(!vlocs[key])vlocs[key]={};
+    if(p.vloc)vlocs[key][p.vloc]=(vlocs[key][p.vloc]||0)+1;
+    const got=scans[key];
+    if(got===item.qty){
+      beep('done');el.className='ok';
+      el.innerHTML='<span class="stamp s-ok">合</span><span><b>'+esc(dispName)+'</b>　'+got+' / '+item.qty+'　✓ 此品項已完成</span><span class="scan-detail">'+detail+'</span>';
+    }else if(got<item.qty){
+      beep('ok');el.className='';
+      el.innerHTML='<span class="stamp s-short">欠</span><span><b>'+esc(dispName)+'</b>　'+got+' / '+item.qty+'</span><span class="scan-detail">'+detail+'</span>';
+    }else{
+      beep('alarm');el.className='bad';
+      el.innerHTML='<span class="stamp s-over">超</span><span><b>'+esc(dispName)+'</b>　'+got+' / '+item.qty+'　⚠ 超出預計數量，請停下處理！</span><span class="scan-detail">'+detail+'</span>';
+    }
+  }else{
+    // 差異診斷：找最接近的訂單列，指出哪一欄對不上
+    const nc=norm(p.cust),nf=norm(p.fish),nl=normLoc(p.loc);
+    let best=null,bestCnt=0;
+    order.forEach(o=>{
+      let cnt=0;
+      if(norm(o.cust)===nc)cnt++;
+      if(norm(o.fish)===nf)cnt++;
+      if(normLoc(o.loc)===nl)cnt++;
+      if(cnt>bestCnt){bestCnt=cnt;best=o;}
+    });
+    let diag='';
+    if(best&&bestCnt>=1){
+      const diffs=[];
+      if(norm(best.cust)!==nc)diffs.push('客戶：訂單「'+esc(best.cust)+'」≠ 掃碼「'+esc(p.cust)+'」');
+      if(norm(best.fish)!==nf)diffs.push('品號：訂單「'+esc(best.fish)+'」≠ 掃碼「'+esc(p.fish)+'」');
+      if(normLoc(best.loc)!==nl)diffs.push('實際櫃位：訂單「'+esc(best.loc)+'」≠ 掃碼「'+esc(p.loc)+'」');
+      diag='<span class="scan-detail" style="color:var(--bad)">最接近的訂單品項'+(best.name?'（'+esc(best.name)+'）':'')+'差在 → '+diffs.join('；')+'</span>';
+    }
+    if(!unknown[key])unknown[key]={cust:p.cust,fish:p.fish,loc:p.loc,count:0,vl:{},sn:{}};
+    unknown[key].count++;
+    if(p.vloc)unknown[key].vl[p.vloc]=(unknown[key].vl[p.vloc]||0)+1;
+    if(p.serial){if(!unknown[key].sn)unknown[key].sn={};unknown[key].sn[norm(p.serial)]=(unknown[key].sn[norm(p.serial)]||0)+1;}
+    beep('alarm');el.className='bad';
+    el.innerHTML='<span class="stamp s-out">外</span><span>訂單外品項（已掃 '+unknown[key].count+' 次），請停下處理！</span><span class="scan-detail">'+detail+'</span>'+diag;
+  }
+  save();render();
+}
+
+/* ================= 相機掃描 ================= */
+const modeGun=document.getElementById('modeGun');
+const modeCam=document.getElementById('modeCam');
+modeGun.onclick=()=>setMode('gun');
+modeCam.onclick=()=>setMode('cam');
+function setMode(m){
+  modeGun.classList.toggle('active',m==='gun');
+  modeCam.classList.toggle('active',m==='cam');
+  if(m==='cam')startCamera();else{stopCamera();focusScan();}
+}
+function startCamera(){
+  if(camScanner)return;
+  camScanner=new Html5Qrcode('reader');
+  camScanner.start(
+    {facingMode:'environment'},
+    {fps:10,qrbox:{width:230,height:230}},
+    text=>{
+      const now=Date.now();
+      if(text===lastCamCode&&now-lastCamTime<2000)return;
+      lastCamCode=text;lastCamTime=now;
+      handleScan(text.trim());
+    },
+    ()=>{}
+  ).catch(err=>{
+    alert('無法開啟相機：'+err+'\n（相機需要 https 或 localhost 環境）');
+    setMode('gun');
+  });
+}
+function stopCamera(){
+  if(camScanner){camScanner.stop().then(()=>{camScanner.clear();camScanner=null;}).catch(()=>{camScanner=null;});}
+}
+
+/* ================= 渲染 ================= */
+function statusOf(o){
+  const got=scans[o.key]||0;
+  if(got===0)return 'zero';
+  if(got<o.qty)return 'short';
+  if(got===o.qty)return 'ok';
+  return 'over';
+}
+const stampMap={ok:['合','s-ok'],short:['欠','s-short'],over:['超','s-over'],zero:['未','s-zero'],out:['外','s-out']};
+
+function vlocText(vl){
+  const ks=Object.keys(vl||{});
+  if(!ks.length)return '';
+  return '<div class="vloc">虛擬：'+ks.map(k=>esc(k)+'×'+vl[k]).join('、')+'</div>';
+}
+
+function render(){
+  let ok=0,short=0,over=0,zero=0;
+  order.forEach(o=>{const s=statusOf(o);if(s==='ok')ok++;else if(s==='over')over++;else if(s==='zero')zero++;else short++;});
+  const outCnt=Object.keys(unknown).length;
+  document.getElementById('stOk').textContent=ok;
+  document.getElementById('stShort').textContent=short+zero;
+  document.getElementById('stOver').textContent=over;
+  document.getElementById('stOut').textContent=outCnt;
+  const totalQty=order.reduce((s,o)=>s+o.qty,0);
+  const gotQty=order.reduce((s,o)=>s+Math.min(scans[o.key]||0,o.qty),0);
+  const pct=totalQty?Math.round(gotQty/totalQty*100):0;
+  document.getElementById('progFill').style.width=pct+'%';
+  document.getElementById('stPct').textContent=pct+'%';
+  document.getElementById('listSub').textContent='品項 '+order.length+'｜總件數 '+totalQty+(badScans.length?('｜格式錯誤 '+badScans.length+' 筆'):'');
+
+  // ---- 核對結果總覽 ----
+  document.getElementById('cOk').textContent=ok;
+  document.getElementById('cShort').textContent=short;
+  document.getElementById('cOver').textContent=over;
+  document.getElementById('cZero').textContent=zero;
+  document.getElementById('cOut').textContent=outCnt;
+  document.getElementById('cLoss').textContent=Object.values(losses).reduce((s,L)=>s+L.count,0);
+  const segTotal=ok+short+over+zero+outCnt;
+  const seg=(n,color,f,label)=>n?`<span style="width:${n/segTotal*100}%;background:${color}" data-f="${f}" title="${label} ${n}"></span>`:'';
+  document.getElementById('sumBar').innerHTML=segTotal?
+    seg(ok,'var(--ok)','done','吻合')+seg(short,'var(--warn)','short','不足')+
+    seg(over,'var(--bad)','over','超出')+seg(zero,'#C9C4B8','zero','未掃')+
+    seg(outCnt,'#8E3B34','out','訂單外'):'';
+  document.querySelectorAll('.sum-card').forEach(c=>c.classList.toggle('active',c.dataset.f===filterMode));
+
+  const q=document.getElementById('searchBox').value.trim().toLowerCase();
+  let html='';
+  const vis=[];
+  order.forEach((o,idx)=>{
+    const s=statusOf(o);
+    if(filterMode==='pending'&&s==='ok')return;
+    if(filterMode==='diff'&&(s==='ok'||s==='zero'))return;
+    if(filterMode==='done'&&s!=='ok')return;
+    if(filterMode==='short'&&s!=='short')return;
+    if(filterMode==='over'&&s!=='over')return;
+    if(filterMode==='zero'&&s!=='zero')return;
+    if(filterMode==='out')return;
+    if(!passColFilters(o,false))return;
+    const snList=Object.keys(serials[o.key]||{}).join(' ');
+    if(q&&![o.cust,o.custName,o.fish,o.loc,o.name,snList].some(v=>String(v||'').toLowerCase().includes(q)))return;
+    vis.push({o,idx});
+  });
+  if(sortState.col){
+    const c=sortState.col,d=sortState.dir;
+    const isNum=['qty','got','diff'].includes(c);
+    vis.sort((a,b)=>{
+      const va=sortValOf(a.o,c),vb=sortValOf(b.o,c);
+      if(isNum)return (va-vb)*d;
+      return String(va).localeCompare(String(vb),'zh-Hant',{numeric:true})*d;
+    });
+  }
+  vis.forEach(({o,idx})=>{
+    const s=statusOf(o);
+    const got=scans[o.key]||0,diff=got-o.qty;
+    const [ch,cls]=stampMap[s];
+    const rowCls=s==='over'?'r-over':(s==='short'?'r-short':'');
+    html+=`<tr class="${rowCls}">
+      <td><span class="stamp ${cls}">${ch}</span></td>
+      <td>${o.custName?'<div class="cust-name">'+esc(o.custName)+'</div>':''}${esc(o.cust)}</td>
+      <td class="mono">${esc(o.fish)}</td>
+      <td>${esc(o.name)||'<span style="color:var(--ink-soft)">—</span>'}</td>
+      <td class="mono">${esc(o.loc)}${vlocText(vlocs[o.key])}</td>
+      <td class="num">${o.qty}</td>
+      <td class="num">${got}</td>
+      <td class="num" style="color:${diff===0?'var(--ok)':(diff<0?'var(--warn)':'var(--bad)')}">${diff>0?'+':''}${diff}</td>
+      <td>
+        <button class="qty-btn" onclick="adjust(${idx},1)">＋</button>
+        <button class="qty-btn" onclick="adjust(${idx},-1)">－</button>
+      </td></tr>`;
+  });
+  Object.keys(unknown).forEach(key=>{
+    if(['done','short','over','zero'].includes(filterMode))return;
+    const u=unknown[key];
+    if(!passColFilters(u,true))return;
+    const uCustName=custNameOf(u.cust);
+    const uSn=Object.keys(u.sn||{}).join(' ');
+    if(q&&![u.cust,uCustName,u.fish,u.loc,uSn].some(v=>String(v||'').toLowerCase().includes(q)))return;
+    html+=`<tr class="r-out">
+      <td><span class="stamp s-out">外</span></td>
+      <td>${uCustName?'<div class="cust-name">'+esc(uCustName)+'</div>':''}${esc(u.cust)}</td>
+      <td class="mono">${esc(u.fish)}</td>
+      <td style="color:var(--bad)">訂單外品項</td>
+      <td class="mono">${esc(u.loc)}${vlocText(u.vl)}</td>
+      <td class="num">0</td>
+      <td class="num">${u.count}</td>
+      <td class="num" style="color:var(--bad)">+${u.count}</td>
+      <td><button class="qty-btn" onclick="removeUnknown('${encodeURIComponent(key)}')">移除</button></td></tr>`;
+  });
+  document.getElementById('tbody').innerHTML=html;
+  document.getElementById('emptyNote').style.display=html?'none':'block';
+  renderLoss();
+}
+/* 由客戶代碼回查客戶名稱（訂單外品項用） */
+function custNameOf(cust){
+  const nc=norm(cust);
+  const hit=order.find(o=>norm(o.cust)===nc&&o.custName);
+  return hit?hit.custName:'';
+}
+/* 由品號回查品名（損耗區用） */
+function nameOfFish(fish){
+  const nf=norm(fish);
+  const lo=Object.values(lossOrder).find(x=>norm(x.fish)===nf&&x.name);
+  if(lo)return lo.name;
+  const hit=order.find(o=>norm(o.fish)===nf&&o.name);
+  return hit?hit.name:'';
+}
+/* ---------- 損耗區渲染（預計 vs 實掃） ---------- */
+function renderLoss(){
+  const keys=[...new Set([...Object.keys(lossOrder),...Object.keys(losses)])];
+  const sec=document.getElementById('stepLoss');
+  if(!keys.length){sec.style.display='none';return;}
+  sec.style.display='';
+  let expTotal=0,gotTotal=0,html='';
+  keys.sort().forEach(lk=>{
+    const lo=lossOrder[lk],L=losses[lk];
+    const fish=(lo||L).fish, loc=(lo||L).loc;
+    const exp=lo?lo.qty:0, got=L?L.count:0, diff=got-exp;
+    expTotal+=exp;gotTotal+=got;
+    const name=(lo&&lo.name)||nameOfFish(fish);
+    const snList=L?Object.keys(L.sn||{}).map(k=>L.sn[k]>1?k+'×'+L.sn[k]:k).join('、'):'';
+    let ch='未',cls='s-zero',rowCls='';
+    if(got>0&&got===exp){ch='合';cls='s-ok';}
+    else if(got>0&&got<exp){ch='欠';cls='s-short';rowCls='r-short';}
+    else if(got>exp){ch='超';cls='s-over';rowCls='r-over';}
+    html+=`<tr class="${rowCls}">
+      <td><span class="stamp ${cls}">${ch}</span></td>
+      <td class="mono">${esc(fish)}</td>
+      <td>${esc(name)||'<span style="color:var(--ink-soft)">—</span>'}</td>
+      <td class="mono">${esc(snList)||'—'}</td>
+      <td class="mono">${esc(loc)}${L?vlocText(L.vl):''}</td>
+      <td class="num">${exp}</td>
+      <td class="num" style="color:var(--loss);font-weight:600">${got}</td>
+      <td class="num" style="color:${diff===0?'var(--ok)':(diff<0?'var(--warn)':'var(--bad)')}">${diff>0?'+':''}${diff}</td>
+      <td>${L?`<button class="qty-btn" onclick="removeLoss('${encodeURIComponent(lk)}')">清掃</button>`:''}</td></tr>`;
+  });
+  document.getElementById('lossBody').innerHTML=html;
+  document.getElementById('lossSub').textContent='品項 '+keys.length+'｜預計損耗 '+expTotal+'｜實掃 '+gotTotal;
+}
+window.removeLoss=enc=>{delete losses[decodeURIComponent(enc)];save();render();};
+/* 總覽卡片與比例條點擊 → 切換篩選 */
+function setFilter(f){
+  filterMode=(filterMode===f)?'all':f;   // 再點一次取消篩選
+  document.querySelectorAll('.chip').forEach(x=>x.classList.toggle('active',x.dataset.f===filterMode));
+  render();
+}
+document.querySelectorAll('.sum-card').forEach(c=>{
+  c.onclick=()=>{
+    if(c.dataset.f==='loss'){
+      const sec=document.getElementById('stepLoss');
+      if(sec.style.display!=='none')sec.scrollIntoView({behavior:'smooth',block:'start'});
+      return;
+    }
+    setFilter(c.dataset.f);
+  };
+});
+document.getElementById('sumBar').addEventListener('click',e=>{
+  const f=e.target.dataset&&e.target.dataset.f;
+  if(f)setFilter(f);
+});
+
+window.adjust=(idx,d)=>{
+  const key=order[idx].key;
+  scans[key]=Math.max(0,(scans[key]||0)+d);
+  if(scans[key]===0)delete scans[key];
+  save();render();
+};
+window.removeUnknown=enc=>{delete unknown[decodeURIComponent(enc)];save();render();};
+
+document.getElementById('searchBox').oninput=render;
+document.querySelectorAll('.chip').forEach(c=>{
+  c.onclick=()=>{
+    document.querySelectorAll('.chip').forEach(x=>x.classList.remove('active'));
+    c.classList.add('active');filterMode=c.dataset.f;render();
+  };
+});
+
+/* ================= 匯出核對報告 ================= */
+document.getElementById('btnExport').onclick=()=>{
+  const head=['客戶代碼','客戶名稱','品號','品名','批號','實際櫃位','預計數量','實掃數量','差異','狀態','掃到的虛擬櫃位'];
+  const snStr=(obj,fish)=>Object.keys(obj||{}).map(k=>{
+    const t=fish?fish+'*'+k:k;
+    return obj[k]>1?t+'×'+obj[k]:t;
+  }).join('、');
+  const vlStrOf=obj=>Object.keys(obj||{}).map(k=>k+'×'+obj[k]).join('、');
+
+  const allRows=[],doneRows=[],pendingRows=[],diffRows=[],unmatchedRows=[],lossRows=[];
+  order.forEach(o=>{
+    const got=scans[o.key]||0,s=statusOf(o);
+    const label={ok:'吻合',short:'不足',over:'超出',zero:'未掃'}[s];
+    const row=[o.cust,o.custName||'',o.fish,o.name,snStr(serials[o.key],o.fish),o.loc,o.qty,got,got-o.qty,label,vlStrOf(vlocs[o.key])];
+    allRows.push(row);
+    if(s==='ok')doneRows.push(row);
+    if(s==='zero'||s==='short')pendingRows.push(row);
+    if(s==='short'||s==='over')diffRows.push(row);
+  });
+  Object.values(unknown).forEach(u=>{
+    const row=[u.cust,custNameOf(u.cust),u.fish,'',snStr(u.sn,u.fish),u.loc,0,u.count,u.count,'訂單外',vlStrOf(u.vl)];
+    allRows.push(row);unmatchedRows.push(row);
+  });
+  const lossKeys=[...new Set([...Object.keys(lossOrder),...Object.keys(losses)])];
+  lossKeys.sort().forEach(lk=>{
+    const lo=lossOrder[lk],L=losses[lk];
+    const fish=(lo||L).fish, loc=(lo||L).loc;
+    const exp=lo?lo.qty:0, got=L?L.count:0;
+    const name=(lo&&lo.name)||nameOfFish(fish);
+    const row=['cwa.doa','CWA魚損扣除帳號',fish,name,L?snStr(L.sn,fish):'',loc,exp,got,got-exp,'損耗',L?vlStrOf(L.vl):''];
+    allRows.push(row);lossRows.push(row);
+  });
+  badScans.forEach(b=>{
+    const row=['','','','',b,'','','','','格式錯誤',''];
+    allRows.push(row);unmatchedRows.push(row);
+  });
+
+  const cols=[{wch:12},{wch:16},{wch:14},{wch:24},{wch:26},{wch:12},{wch:10},{wch:10},{wch:8},{wch:8},{wch:20}];
+  const wb=XLSX.utils.book_new();
+  const addSheet=(name,rows)=>{
+    const ws=XLSX.utils.aoa_to_sheet([head,...rows]);
+    ws['!cols']=cols;
+    XLSX.utils.book_append_sheet(wb,ws,name);
+  };
+  addSheet('全部資料',allRows);
+  addSheet('完成',doneRows);
+  addSheet('未完成',pendingRows);
+  addSheet('有差異',diffRows);
+  addSheet('未配對',unmatchedRows);
+  addSheet('損耗',lossRows);
+  const d=new Date(),pad=n=>String(n).padStart(2,'0');
+  XLSX.writeFile(wb,'出貨核對_'+d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+'_'+pad(d.getHours())+pad(d.getMinutes())+'.xlsx');
+};
+
+/* ================= 重設 / 儲存 ================= */
+document.getElementById('btnResetScan').onclick=()=>{
+  if(!confirm('清除所有掃描紀錄？（訂單保留）'))return;
+  scans={};serials={};vlocs={};unknown={};losses={};badScans=[];save();render();
+  const el=document.getElementById('lastScan');
+  el.className='';el.innerHTML='<span>尚未掃描</span>';
+};
+document.getElementById('btnResetAll').onclick=()=>{
+  if(!confirm('重設全部（訂單與掃描紀錄都會清除）？'))return;
+  localStorage.removeItem(LS_KEY);location.reload();
+};
+function save(){
+  try{localStorage.setItem(LS_KEY,JSON.stringify({order,lossOrder,scans,serials,vlocs,unknown,losses,badScans}));}catch(e){}
+}
+/* ================= 共用模式 / 雲端訂單 ================= */
+/* 從固定欄位名的雲端資料建立 order（雲端檔欄位已知：客戶代碼/客戶名稱/Fishtype/中文名/隻數/實際櫃位）*/
+function buildOrderFromCloud(headers,rows){
+  const idx=name=>headers.findIndex(h=>h.replace(/\s/g,'').toLowerCase()===name.toLowerCase());
+  const ci=idx('客戶代碼'), cnI=idx('客戶名稱'), fi=idx('Fishtype'),
+        ni=idx('中文名'), qi=idx('隻數'), li=idx('實際櫃位');
+  if(ci<0||fi<0||li<0){alert('雲端訂單欄位對不到（需要客戶代碼/Fishtype/實際櫃位）');return false;}
+  const map={},lmap={};
+  rows.forEach(r=>{
+    const cust=String(r[ci]??'').trim(), fish=String(r[fi]??'').trim(), loc=String(r[li]??'').trim();
+    if(!cust&&!fish&&!loc)return;
+    const custName=cnI>=0?String(r[cnI]??'').trim():'';
+    const name=ni>=0?String(r[ni]??'').trim():'';
+    const qty=qi>=0?(parseFloat(r[qi])||1):1;
+    if(LOSS_CUSTS.includes(norm(cust))){
+      const lk=norm(fish)+SEP+normLoc(loc);
+      if(lmap[lk]){lmap[lk].qty+=qty;if(!lmap[lk].name&&name)lmap[lk].name=name;}
+      else lmap[lk]={fish,loc,name,qty};
+      return;
+    }
+    const key=makeKey(cust,fish,loc);
+    if(map[key]){map[key].qty+=qty;if(!map[key].name&&name)map[key].name=name;if(!map[key].custName&&custName)map[key].custName=custName;}
+    else map[key]={key,cust,custName,fish,loc,name,qty};
+  });
+  order=Object.values(map).filter(o=>o.cust||o.fish||o.loc);
+  lossOrder=lmap;
+  return order.length>0;
+}
+
+async function fetchCloudOrder(){
+  const data=await gasGet({action:'order'});
+  if(!data||!data.ok)throw new Error((data&&data.error)||'讀取失敗');
+  return data;
+}
+
+/* 模式選擇卡片 */
+document.querySelectorAll('.mode-card').forEach(c=>{
+  c.onclick=async()=>{
+    const mode=c.dataset.mode;
+    if(mode==='manual'){
+      appMode='manual';
+      document.getElementById('modePicker').style.display='none';
+      document.getElementById('stepImport').style.display='';
+      return;
+    }
+    if(mode==='cloud'){
+      appMode='cloud';
+      c.querySelector('p').textContent='讀取雲端最新訂單中…';
+      try{
+        const data=await fetchCloudOrder();
+        if(buildOrderFromCloud(data.headers,data.rows)){
+          document.getElementById('modePicker').style.display='none';
+          scans={};serials={};vlocs={};unknown={};losses={};badScans=[];
+          save();startWork();
+          document.getElementById('orderMeta').innerHTML+=' ｜ 來源：<b>'+esc(data.fileName)+'</b>';
+        }
+      }catch(e){ alert('讀取雲端訂單失敗：'+e.message); c.querySelector('p').textContent='自動抓雲端資料夾最新訂單檔，本機作業。'; }
+      return;
+    }
+    if(mode==='share'){
+      appMode='share';
+      document.getElementById('shareSetup').style.display='block';
+      document.querySelectorAll('.mode-card').forEach(x=>x.style.borderColor='');
+      c.style.borderColor='var(--accent)';
+    }
+  };
+});
+
+/* 建立新批次（讀雲端最新訂單） */
+document.getElementById('btnCreateSession').onclick=async()=>{
+  deviceName=document.getElementById('deviceName').value.trim()||('裝置'+Math.floor(Math.random()*900+100));
+  const info=document.getElementById('sessionInfo');
+  info.textContent='建立批次並讀取雲端訂單中…';
+  try{
+    const data=await fetchCloudOrder();
+    if(!buildOrderFromCloud(data.headers,data.rows)){info.textContent='訂單解析失敗';return;}
+    const sj=await gasPost({action:'createSession',device:deviceName,fileName:data.fileName});
+    if(!sj||!sj.ok){info.textContent='建立批次失敗：'+((sj&&sj.error)||'');return;}
+    sessionCode=sj.session;
+    enterShareMode(data.fileName);
+  }catch(e){ info.textContent='失敗：'+e.message; }
+};
+
+/* 加入現有批次 */
+document.getElementById('btnJoinSession').onclick=async()=>{
+  const code=document.getElementById('joinCode').value.trim();
+  if(code.length<6){alert('請輸入 6 位數批次碼');return;}
+  deviceName=document.getElementById('deviceName').value.trim()||('裝置'+Math.floor(Math.random()*900+100));
+  const info=document.getElementById('sessionInfo');
+  info.textContent='加入批次並讀取雲端訂單中…';
+  try{
+    // 加入者也讀同一份雲端最新訂單（假設同批用同一份）
+    const data=await fetchCloudOrder();
+    if(!buildOrderFromCloud(data.headers,data.rows)){info.textContent='訂單解析失敗';return;}
+    sessionCode=code;
+    enterShareMode(data.fileName);
+  }catch(e){ info.textContent='失敗：'+e.message; }
+};
+
+function enterShareMode(fileName){
+  document.getElementById('modePicker').style.display='none';
+  scans={};serials={};vlocs={};unknown={};losses={};badScans=[];
+  lastEventTs=0;seenEventTs={};
+  startWork();
+  document.getElementById('orderMeta').innerHTML+=
+    ' ｜ <b style="color:var(--accent)">共用批次 '+esc(sessionCode)+'</b>（裝置：'+esc(deviceName)+'）｜ 來源：'+esc(fileName||'');
+  document.getElementById('scanSub').innerHTML='批次碼 <b>'+esc(sessionCode)+'</b>　告訴同事這組號碼即可一起掃';
+  const badge=document.getElementById('syncBadge');
+  badge.style.display='';
+  startSync();
+}
+
+/* 上傳一筆掃碼到後端 */
+function uploadScan(p,raw){
+  if(appMode!=='share')return;
+  const body={action:'scan',session:sessionCode,device:deviceName,raw:raw,
+    cust:p.cust,fish:p.fish,serial:p.serial,loc:p.loc,vloc:p.vloc};
+  gasPost(body)
+    .then(j=>{ if(j&&j.ok)seenEventTs[j.ts]=true; })
+    .catch(()=>{ pendingQueue.push(body); }); // 離線暫存
+}
+
+/* 輪詢：把別人（與自己）的掃碼合併進畫面 */
+function startSync(){
+  setSyncBadge(true);
+  const poll=async()=>{
+    // 先補傳離線佇列
+    if(pendingQueue.length){
+      const q=pendingQueue.shift();
+      try{ await gasPost(q); }
+      catch(e){ pendingQueue.unshift(q); }
+    }
+    try{
+      const data=await gasGet({action:'events',session:sessionCode,since:lastEventTs});
+      setSyncBadge(true);
+      if(data&&data.ok&&data.events.length){
+        data.events.forEach(ev=>{
+          if(seenEventTs[ev.ts])return;   // 自己剛上傳的，避免重複計
+          seenEventTs[ev.ts]=true;
+          applyRemoteScan(ev);
+        });
+        lastEventTs=data.events[data.events.length-1].ts;
+        render();
+      }else if(data&&data.ok){
+        lastEventTs=Math.max(lastEventTs, data.now-1);
+      }
+    }catch(e){ setSyncBadge(false); }
+  };
+  poll();
+  syncTimer=setInterval(poll,2500);
+}
+function setSyncBadge(on){
+  const b=document.getElementById('syncBadge');
+  b.className='sync-badge'+(on?'':' sync-off');
+  document.getElementById('syncText').textContent=on?('已連線・批次 '+sessionCode):'連線中斷，重試中';
+}
+
+/* 套用遠端一筆掃碼（不重新上傳、不發音，靜默併入） */
+function applyRemoteScan(ev){
+  const p={cust:ev.cust,fish:ev.fish,serial:ev.serial,loc:ev.loc,vloc:ev.vloc};
+  // 損耗
+  if(LOSS_CUSTS.includes(norm(p.cust))){
+    const lk=norm(p.fish)+SEP+normLoc(p.loc);
+    if(!losses[lk])losses[lk]={fish:p.fish,loc:p.loc,count:0,vl:{},sn:{}};
+    losses[lk].count++;
+    if(p.vloc)losses[lk].vl[p.vloc]=(losses[lk].vl[p.vloc]||0)+1;
+    if(p.serial)losses[lk].sn[norm(p.serial)]=(losses[lk].sn[norm(p.serial)]||0)+1;
+    save();return;
+  }
+  const key=makeKey(p.cust,p.fish,p.loc);
+  const item=order.find(o=>o.key===key);
+  if(item){
+    if(p.serial){if(!serials[key])serials[key]={};serials[key][norm(p.serial)]=(serials[key][norm(p.serial)]||0)+1;}
+    scans[key]=(scans[key]||0)+1;
+    if(!vlocs[key])vlocs[key]={};
+    if(p.vloc)vlocs[key][p.vloc]=(vlocs[key][p.vloc]||0)+1;
+  }else{
+    if(!unknown[key])unknown[key]={cust:p.cust,fish:p.fish,loc:p.loc,count:0,vl:{},sn:{}};
+    unknown[key].count++;
+    if(p.vloc)unknown[key].vl[p.vloc]=(unknown[key].vl[p.vloc]||0)+1;
+    if(p.serial)unknown[key].sn[norm(p.serial)]=(unknown[key].sn[norm(p.serial)]||0)+1;
+  }
+  save();
+}
+
+function load(){
+  // 共用/雲端模式由使用者點選啟動，這裡只還原單機作業
+  try{
+    const d=JSON.parse(localStorage.getItem(LS_KEY));
+    if(d&&d.order&&d.order.length){
+      order=d.order;lossOrder=d.lossOrder||{};scans=d.scans||{};serials=d.serials||{};vlocs=d.vlocs||{};unknown=d.unknown||{};losses=d.losses||{};badScans=d.badScans||[];
+      appMode='manual';
+      document.getElementById('modePicker').style.display='none';
+      document.getElementById('dropZone').textContent='已從本機還原上次作業（可重新匯入覆蓋）';
+      startWork();
+    }
+  }catch(e){}
+}
+function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+load();
+</script>
+</body>
+</html>
