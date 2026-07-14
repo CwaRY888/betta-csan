@@ -93,7 +93,7 @@ function todaySession(){
   const d=new Date(),p=n=>String(n).padStart(2,'0');
   return String(d.getFullYear()).slice(2)+p(d.getMonth()+1)+p(d.getDate());
 }
-document.getElementById('btnStart').onclick=()=>{
+document.getElementById('btnStart').onclick=async()=>{
   GAS=document.getElementById('gasUrl').value.trim().replace(/\?.*$/,'');
   DEV=document.getElementById('dev').value.trim()||'相機';
   SESS=todaySession();   // 批次＝今日日期，與主工具一致
@@ -101,7 +101,7 @@ document.getElementById('btnStart').onclick=()=>{
   localStorage.setItem(LS,JSON.stringify({url:GAS,dev:DEV}));
   document.getElementById('setup').style.display='none';
   document.getElementById('scanArea').style.display='block';
-  startCam();
+  await startCam();
 };
 document.getElementById('btnStop').onclick=()=>{
   if(scanner){scanner.stop().then(()=>{scanner.clear();scanner=null;}).catch(()=>{scanner=null;});}
@@ -109,13 +109,49 @@ document.getElementById('btnStop').onclick=()=>{
   document.getElementById('setup').style.display='block';
 };
 
-function startCam(){
-  scanner=new Html5Qrcode('reader');
-  scanner.start({facingMode:'environment'},{fps:10,qrbox:{width:250,height:250}},
-    onScan,()=>{}).catch(err=>{
-      document.getElementById('last').className='bad';
-      document.getElementById('last').innerHTML='<span>無法開啟相機：'+err+'</span>';
-    });
+async function startCam(){
+  const el=document.getElementById('last');
+  el.className='';el.innerHTML='<span>相機啟動中…</span>';
+
+  // iPhone Safari：先明確請求相機權限，確保 getUserMedia 觸發
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}});
+    // 拿到權限後立刻關掉這條 stream，交給 html5-qrcode 接手
+    stream.getTracks().forEach(t=>t.stop());
+  }catch(err){
+    el.className='bad';
+    el.innerHTML='<span class="stamp">✕</span><span>無法取得相機權限：'+esc(err.name||err)+'</span>';
+    return;
+  }
+
+  scanner=new Html5Qrcode('reader',{verbose:false});
+  const config={fps:10,qrbox:{width:250,height:250},aspectRatio:1.0};
+
+  // 優先用相機清單挑「後鏡頭」，挑不到再退回 facingMode
+  let started=false;
+  try{
+    const cams=await Html5Qrcode.getCameras();
+    if(cams&&cams.length){
+      // 找名稱含 back/rear/後/環境 的，否則用最後一顆（通常是後鏡頭）
+      let cam=cams.find(c=>/back|rear|environment|後|環境/i.test(c.label));
+      if(!cam)cam=cams[cams.length-1];
+      await scanner.start(cam.id,config,onScan,()=>{});
+      started=true;
+    }
+  }catch(e){ /* 落到下面用 facingMode */ }
+
+  if(!started){
+    try{
+      await scanner.start({facingMode:'environment'},config,onScan,()=>{});
+      started=true;
+    }catch(e){
+      el.className='bad';
+      el.innerHTML='<span class="stamp">✕</span><span>相機啟動失敗：'+esc(e.message||e)+'</span>'+
+        '<span class="detail">請重新整理頁面再試，或確認沒有其他 App 佔用相機</span>';
+      return;
+    }
+  }
+  el.className='';el.innerHTML='<span>對準 QR Code 即可，掃到自動送出</span>';
 }
 
 function onScan(text){
